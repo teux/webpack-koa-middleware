@@ -52,6 +52,7 @@ module.exports = {
                                 //  on its own in-memory file system 
         hot: true,              // Switch on Hot Module Replacement
         indexEntry: 'index',    // Entry to add HNR code to (EntryChunk or CommonsChunk)
+        secure: true,           // use https or http
         stats: {
             colors: true,
             hash: false,
@@ -73,14 +74,14 @@ For an explanation of parameters see webpack [documentation](http://webpack.gith
 Middlewares executed in a stack-like manner upon request. Sometimes you need to
 explicitly retrieve data from webpack's virtual file system.
 
-Middleware has function `asset` which takes URL and returns promise
+This middleware has function `asset` which takes URL and returns promise
 which is fulfilled with asset's content.
 
 ```js
 var middleware = require('webpack-koa-middleware');
 var webpackCfg = require('webpack-cfg.js');
-var middleware = middleware(webpackCfg) 
 
+middleware = middleware(webpackCfg) 
 middleware.asset('/app.js')
     .then(function (content) {
         console.log(content instanceof Buffer); // => true

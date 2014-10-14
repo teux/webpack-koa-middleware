@@ -1,6 +1,6 @@
 {
   "name": "webpack-koa-middleware",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Webpack middleware for koa with HMR support",
   "main": "index.js",
   "scripts": {
