@@ -1,6 +1,6 @@
 {
   "name": "webpack-koa-middleware",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "description": "Webpack middleware for koa with HMR support",
   "main": "index.js",
   "scripts": {
@@ -17,6 +17,7 @@
   "homepage": "https://github.com/teux/webpack-koa-middleware",
   "license": "MIT",
   "dependencies": {
+    "extend": "^2.0.0",
     "socket.io": "^0.9.17"
   },
   "peerDependencies": {

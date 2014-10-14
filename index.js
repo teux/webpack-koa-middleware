@@ -1,53 +1,86 @@
 var http = require('http');
+var util = require('util');
 var socketio = require("socket.io");
+var extend = require("extend");
 var webpack = require("webpack");
 var webpackDevMiddleware = require("webpack-dev-middleware");
 
-function sendStats(sockets, stats, force) {
-    if (!sockets || !stats) return;
+/**
+ * Mocked response
+ * @param {String} url
+ * @param {Function} cb Callback which is passed file content (Buffer)
+ * @constructor
+ */
+function MockRes (url, cb) {
+    this.url = url;
+    this.headers = {};
+    this.content = undefined;
+    this.setHeader = function (name, value) {
+        this.headers[name] = value;
+    }.bind(this);
+    this.end = function (content) {
+        this.content = content;
+        cb(this);
+    }.bind(this);
+}
+
+/**
+ * Mocked request
+ * @param {String} url
+ * @constructor
+ */
+function MockReq (url) {
+    this.url = url;
+}
+
+/**
+ * Sends signals and stats in socket
+ * @param {WebSocket} socket
+ * @param {Object} stats Webpack generated stats
+ * @param {Boolean} force
+ */
+function sendStats(socket, stats, force) {
+    if (!socket || !stats) return;
     if (!force && stats && stats.assets && stats.assets.every(function (asset) {
         return !asset.emitted;
     })) return;
-    sockets.emit("hash", stats.hash);
+    socket.emit("hash", stats.hash);
     if (stats.errors.length > 0)
-        sockets.emit("errors", stats.errors);
+        socket.emit("errors", stats.errors);
     else if (stats.warnings.length > 0)
-        sockets.emit("warnings", stats.warnings);
+        socket.emit("warnings", stats.warnings);
     else
-        sockets.emit("ok");
+        socket.emit("ok");
 }
 
 module.exports = function (cfg) {
-    var invalidPlugin,
-        indexEntry,
-        middleware,
-        compiler,
+    var indexEntry = cfg.devServer && cfg.devServer.indexEntry,
         sockets,
         stats;
 
-    // Return if no index entry
-    indexEntry = cfg.devServer.indexEntry;
-    if (!cfg.entry[indexEntry])
-        throw new Error('No entry specified or entry missing in webpack config');
-
+    // Validate devServer config entry
+    if (!(indexEntry && cfg.entry && cfg.entry[indexEntry])) {
+        throw new Error('Wrong devServer parameters in webpack config');
+    }
     // Configure HMR
     if (cfg.devServer.hot) {
         cfg.plugins = [new webpack.HotModuleReplacementPlugin()].concat(cfg.plugins);
         cfg.entry[indexEntry] = [
-            'webpack-dev-server/client?http://' +
-                (cfg.devServer.host || 'localhost') + ':' +
-                (cfg.devServer.port || '8090'),
+            util.format('webpack-dev-server/client?%s://%s:%s',
+                cfg.devServer.secure ? 'https' : 'http',
+                    cfg.devServer.host || 'localhost',
+                    cfg.devServer.port || '8090'
+            ),
             'webpack/hot/dev-server'
         ].concat(cfg.entry[indexEntry]);
     }
 
-    // Webpack compiler and middleware
-    compiler = webpack(cfg);
-    middleware = webpackDevMiddleware(compiler, cfg.devServer);
+    var compiler = webpack(cfg);
+    var middleware = webpackDevMiddleware(compiler, cfg.devServer);
 
     // Handlers for send messages to socket
     if (cfg.devServer.hot) {
-        invalidPlugin = function () {
+        var invalidPlugin = function () {
             if (sockets) sockets.emit("invalid");
         };
         compiler.plugin("compile", invalidPlugin);
@@ -58,12 +91,33 @@ module.exports = function (cfg) {
         });
     }
 
-    return function* webpack(next) {
-        var ctx = this;
+    /**
+     * Calls webpack middleware in express manner.
+     * @param {String} url
+     * @returns {Promise}
+     */
+    var getAsset = function (url) {
+        return new Promise(function (resolve, reject) {
+            middleware(new MockReq(url), new MockRes(url, resolve), reject);
+        });
+    };
+
+    /**
+     * Creates sockets once, calls webpack middleware, writes asset to response.
+     * @param {Function} next Next middleware.
+     */
+    webpackMiddleware = function* (next) {
+        var server = this.req.connection.server,
+            headers,
+            asset;
+
+        // hack for using with node-spdy, because I don't know
+        // how to obtain server instance from request in this case
+        server = server || this.app._server;
 
         // Create sockets once if HMR enabled
-        if (!sockets && cfg.devServer.hot) {
-            sockets = socketio.listen(ctx.req.connection.server, {
+        if (!sockets && cfg.devServer.hot && server) {
+            sockets = socketio.listen(server, {
                 "log level": 1
             }).sockets;
             sockets.on("connection", function (socket) {
@@ -71,27 +125,27 @@ module.exports = function (cfg) {
                 sendStats(sockets, stats, true);
             });
         }
-
         yield* next;
-        if (ctx.body || ctx.status !== 404) return;   // response is handled
+        if (this.body || this.status !== 404) return;   // response is handled
 
-        return yield new Promise(function (resolve) {
-            // Mocked response
-            var mockRes = {
-                _headers: {},
-                setHeader: function (name, value) {
-                    mockRes._headers[name] = value;
-                },
-                end: function (content) {
-                    Object.keys(mockRes._headers).forEach(function (key) {
-                        ctx.set(key, mockRes._headers[key]);
-                    });
-                    ctx.body = content;
-                    ctx.status = 200;
-                    resolve();
-                }
-            };
-            middleware(ctx.req, mockRes, resolve);
-        }.bind(this));
+        if (asset = yield getAsset(this.url)) {
+            headers = extend(asset.headers, cfg.devServer.headers);
+            Object.keys(headers).forEach(function (header) {
+                this.set(header, headers[header]);
+            }, this);
+            this.body = asset.content;
+            this.status = 200;
+        }
     };
+
+    /**
+     * Calls webpack for asset outside normal middleware stack.
+     * @param {String} url Asset's url.
+     * @returns {Promise}
+     */
+    webpackMiddleware.assets = function (url) {
+        return getAsset(url);
+    };
+
+    return webpackMiddleware;
 };

@@ -1,6 +1,9 @@
-### Development only!
+### For development purposes only!
+
 
 # Webpack middleware for koa 
+
+Wraps [webpack-dev-middleware](https://github.com/webpack/webpack-dev-middleware) for use in koa. Adds hot module replacement ([HMR](http://webpack.github.io/docs/hot-module-replacement-with-webpack.html)).
 
 Webpack is the [webpack](http://webpack.github.io/) and it's module bundler.
 [Koa](http://koajs.com/#request) is the next generation web framework for node.js.
@@ -18,7 +21,6 @@ var middleware = require('webpack-koa-middleware');
 var webpackCfg = require('webpack-cfg.js');
 
 app.use(middleware(webpackCfg));
-};
 ```
 , where `app` is koa instance.
 
@@ -65,3 +67,22 @@ module.exports = {
 ```
 
 For an explanation of parameters see webpack [documentation](http://webpack.github.io/docs/configuration.html).
+
+# Explicit call
+
+Middlewares executed in a stack-like manner upon request. Sometimes you need to
+explicitly retrieve data from webpack's virtual file system.
+
+Middleware has function `asset` which takes URL and returns promise
+which is fulfilled with asset's content.
+
+```js
+var middleware = require('webpack-koa-middleware');
+var webpackCfg = require('webpack-cfg.js');
+var middleware = middleware(webpackCfg) 
+
+middleware.asset('/app.js')
+    .then(function (content) {
+        console.log(content instanceof Buffer); // => true
+    });
+```
